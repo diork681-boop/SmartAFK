@@ -1,0 +1,36 @@
+name: SmartAFK
+version: 1.0
+main: com.honeymysteryworld.smartafk.SmartAFK
+api-version: "1.13"
+description: Умная система АФК с телепортом в АФК-мир
+author: HoneyMysteryWorld
+website: https://modrinth.com/plugin/smartafk
+
+commands:
+  afk:
+    description: Переключить АФК режим
+    usage: /afk
+    permission: smartafk.afk
+  afkstatus:
+    description: Показать список АФК игроков
+    usage: /afkstatus
+    aliases: [afklist, afkwho]
+    permission: smartafk.status
+  afkreload:
+    description: Перезагрузить конфиг
+    usage: /afkreload
+    permission: smartafk.reload
+
+permissions:
+  smartafk.afk:
+    description: Использовать /afk
+    default: true
+  smartafk.status:
+    description: Смотреть список АФК
+    default: true
+  smartafk.reload:
+    description: Перезагружать конфиг
+    default: op
+  smartafk.bypass:
+    description: Не кикать за долгий АФК
+    default: op

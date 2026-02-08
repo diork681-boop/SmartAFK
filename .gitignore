@@ -1,0 +1,17 @@
+
+target/
+build/
+
+.idea/
+*.iml
+.eclipse/
+.settings/
+.project
+.classpath
+
+
+.DS_Store
+Thumbs.db
+
+
+*.log
