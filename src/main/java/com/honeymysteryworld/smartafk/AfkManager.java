@@ -34,9 +34,6 @@ public class AfkManager {
         startAfkChecker();
     }
 
-    /**
-     * Перезагрузка настроек из конфига
-     */
     public void reloadSettings() {
         afkTimeout = plugin.getConfig().getInt("afk-timeout", 300) * 1000;
         kickTimeout = plugin.getConfig().getInt("kick-timeout", 1800) * 1000;
@@ -50,17 +47,12 @@ public class AfkManager {
         kickWarningMessage = plugin.getConfig().getString("messages.afk-kick-warning", "&cКик через {time} секунд!");
     }
 
-    /**
-     * Остановка менеджера при выключении плагина
-     */
     public void shutdown() {
-        // Останавливаем таймер
         if (checkerTask != null) {
             checkerTask.cancel();
             checkerTask = null;
         }
 
-        // Возвращаем всех АФК игроков
         for (Player player : Bukkit.getOnlinePlayers()) {
             try {
                 AfkPlayer afkPlayer = players.get(player.getUniqueId());
@@ -105,7 +97,6 @@ public class AfkManager {
         AfkPlayer afkPlayer = getAfkPlayer(player);
         if (afkPlayer == null) return;
 
-        // Уже в этом состоянии
         if (afkPlayer.isAfk() == afk) return;
 
         afkPlayer.setAfk(afk);
@@ -117,49 +108,40 @@ public class AfkManager {
                 onAfkEnd(player, afkPlayer);
             }
         } catch (Exception e) {
-            plugin.getLogger().warning("Ошибка изменения АФК статуса для " + player.getName() + ": " + e.getMessage());
+            plugin.getLogger().warning("Ошибка изменения АФК статуса: " + e.getMessage());
         }
     }
 
     private void onAfkStart(Player player, AfkPlayer afkPlayer) {
-        // Сохраняем состояние ДО телепорта
         afkPlayer.setReturnLocation(player.getLocation());
         afkPlayer.setWasFlying(player.isFlying());
         afkPlayer.setWasAllowFlight(player.getAllowFlight());
 
-        // Оповещаем всех
         broadcastMessage("messages.afk-on", player);
 
-        // Префикс в табе
         if (plugin.getConfig().getBoolean("settings.tab-prefix", true)) {
             String format = plugin.getConfig().getString("settings.tab-prefix-format", "&7[AFK] ");
             player.setPlayerListName(colorize(format) + player.getName());
         }
 
-        // Телепорт в АФК мир
         if (afkWorldEnabled) {
             teleportToAfkWorld(player);
         }
 
-        // Замораживаем чанки (1.14+)
         if (freezeChunks) {
             setChunkForceLoaded(afkPlayer.getReturnLocation(), false);
         }
     }
 
     private void onAfkEnd(Player player, AfkPlayer afkPlayer) {
-        // Оповещаем всех
         broadcastMessage("messages.afk-off", player);
 
-        // Убираем префикс в табе
         if (plugin.getConfig().getBoolean("settings.tab-prefix", true)) {
             player.setPlayerListName(player.getName());
         }
 
-        // Возвращаем игрока
         returnFromAfk(player, afkPlayer);
 
-        // Размораживаем чанки
         if (freezeChunks && afkPlayer.getReturnLocation() != null) {
             setChunkForceLoaded(afkPlayer.getReturnLocation(), true);
         }
@@ -169,7 +151,6 @@ public class AfkManager {
         Location returnLoc = afkPlayer.getReturnLocation();
 
         if (returnLoc != null && returnLoc.getWorld() != null) {
-            // Проверяем что мир загружен
             if (Bukkit.getWorld(returnLoc.getWorld().getName()) != null) {
                 player.teleport(returnLoc);
                 player.setAllowFlight(afkPlayer.wasAllowFlight());
@@ -210,7 +191,7 @@ public class AfkManager {
                     try {
                         checkPlayer(player, now);
                     } catch (Exception e) {
-                        plugin.getLogger().warning("Ошибка проверки игрока " + player.getName() + ": " + e.getMessage());
+                        plugin.getLogger().warning("Ошибка проверки игрока: " + e.getMessage());
                     }
                 }
             }
@@ -223,32 +204,26 @@ public class AfkManager {
 
         long inactive = now - afkPlayer.getLastActivity();
 
-        // Авто-АФК
         if (!afkPlayer.isAfk() && inactive >= afkTimeout) {
             setAfk(player, true);
             return;
         }
 
-        // Проверки для АФК игроков
         if (!afkPlayer.isAfk()) return;
         if (kickTimeout <= 0) return;
         if (player.hasPermission("smartafk.bypass")) return;
 
         long timeLeft = kickTimeout - inactive;
 
-        // Кик за долгий АФК
         if (timeLeft <= 0) {
             player.kickPlayer(colorize(kickMessage));
             return;
         }
 
-        // Предупреждение о кике
-        // Отправляем на 120, 90, 60, 30, 10, 5 секундах
         long secondsLeft = timeLeft / 1000;
         if (secondsLeft == 120 || secondsLeft == 90 || secondsLeft == 60 ||
                 secondsLeft == 30 || secondsLeft == 10 || secondsLeft == 5) {
 
-            // Проверяем что не отправляли уже
             if (afkPlayer.getLastWarningTime() != secondsLeft) {
                 afkPlayer.setLastWarningTime(secondsLeft);
                 String warning = colorize(kickWarningMessage.replace("{time}", String.valueOf(secondsLeft)));
@@ -260,7 +235,6 @@ public class AfkManager {
     private void teleportToAfkWorld(Player player) {
         World afkWorld = Bukkit.getWorld(afkWorldName);
 
-        // Создаём мир если не существует
         if (afkWorld == null) {
             afkWorld = createAfkWorld();
         }
@@ -271,7 +245,7 @@ public class AfkManager {
             player.setAllowFlight(true);
             player.setFlying(true);
         } else {
-            plugin.getLogger().warning("Не удалось создать/загрузить АФК-мир!");
+            plugin.getLogger().warning("Не удалось создать АФК-мир!");
         }
     }
 
@@ -282,6 +256,7 @@ public class AfkManager {
             WorldCreator creator = new WorldCreator(afkWorldName);
             creator.type(WorldType.FLAT);
             creator.generateStructures(false);
+            creator.generator(new EmptyWorldGenerator());
 
             World world = creator.createWorld();
 
@@ -309,7 +284,6 @@ public class AfkManager {
             world.setGameRule(GameRule.DO_IMMEDIATE_RESPAWN, true);
             world.setGameRule(GameRule.SPECTATORS_GENERATE_CHUNKS, false);
         } catch (Exception e) {
-            // Fallback для старых версий
             try {
                 world.setGameRuleValue("doMobSpawning", "false");
                 world.setGameRuleValue("doDaylightCycle", "false");

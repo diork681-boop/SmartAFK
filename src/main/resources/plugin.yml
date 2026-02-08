@@ -1,5 +1,5 @@
 name: SmartAFK
-version: 1.0
+version: 1.1
 main: com.honeymysteryworld.smartafk.SmartAFK
 api-version: "1.13"
 description: Умная система АФК с телепортом в АФК-мир

@@ -19,7 +19,7 @@ public class PlayerActivityListener implements Listener {
     private final SmartAFK plugin;
     private final AfkManager afkManager;
 
-    // Кэш настроек (обновляется при reload)
+    // Кэш настроек
     private boolean detectMovement;
     private boolean detectChat;
     private boolean detectCommands;
@@ -37,9 +37,6 @@ public class PlayerActivityListener implements Listener {
         reloadSettings();
     }
 
-    /**
-     * Перезагрузка настроек из конфига
-     */
     public void reloadSettings() {
         detectMovement = plugin.getConfig().getBoolean("detection.movement", true);
         detectChat = plugin.getConfig().getBoolean("detection.chat", true);
@@ -53,27 +50,42 @@ public class PlayerActivityListener implements Listener {
         afkWorldName = plugin.getConfig().getString("afk-world.world-name", "world_afk");
     }
 
-    /**
-     * Проверка — игрок в АФК мире?
-     */
     private boolean isInAfkWorld(Player player) {
         if (player == null || player.getWorld() == null) return false;
         return player.getWorld().getName().equals(afkWorldName);
     }
 
-    /**
-     * Безопасное обновление активности
-     */
     private void safeUpdateActivity(Player player) {
         if (player == null || !player.isOnline()) return;
-
-        // Не обновляем активность если игрок в АФК-мире (ещё телепортируется)
         if (isInAfkWorld(player)) return;
 
         try {
             afkManager.updateActivity(player);
         } catch (Exception e) {
-            plugin.getLogger().warning("Ошибка обновления активности для " + player.getName() + ": " + e.getMessage());
+            plugin.getLogger().warning("Ошибка обновления активности: " + e.getMessage());
+        }
+    }
+
+    // ==================== БЛОКИРОВКА ДВИЖЕНИЯ В АФК ====================
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onAfkMove(PlayerMoveEvent event) {
+        Player player = event.getPlayer();
+        AfkPlayer afkPlayer = afkManager.getAfkPlayer(player);
+
+        if (afkPlayer == null || !afkPlayer.isAfk()) return;
+
+        Location from = event.getFrom();
+        Location to = event.getTo();
+
+        if (to == null) return;
+
+        // Разрешаем только поворот головы
+        if (from.getX() != to.getX() ||
+                from.getY() != to.getY() ||
+                from.getZ() != to.getZ()) {
+
+            event.setTo(from.setDirection(to.getDirection()));
         }
     }
 
@@ -94,7 +106,6 @@ public class PlayerActivityListener implements Listener {
             Player player = event.getPlayer();
             AfkPlayer afkPlayer = afkManager.getAfkPlayer(player);
 
-            // Возвращаем на место перед выходом если был АФК
             if (afkPlayer != null && afkPlayer.isAfk() && afkPlayer.getReturnLocation() != null) {
                 Location returnLoc = afkPlayer.getReturnLocation();
                 if (returnLoc.getWorld() != null) {
@@ -117,7 +128,6 @@ public class PlayerActivityListener implements Listener {
 
         Location from = event.getFrom();
 
-        // Проверяем только реальное перемещение (не поворот головы)
         if (from.getBlockX() != to.getBlockX() ||
                 from.getBlockY() != to.getBlockY() ||
                 from.getBlockZ() != to.getBlockZ()) {
@@ -131,7 +141,6 @@ public class PlayerActivityListener implements Listener {
 
         final Player player = event.getPlayer();
 
-        // Синхронизируем с основным потоком
         plugin.getServer().getScheduler().runTask(plugin, new Runnable() {
             @Override
             public void run() {
@@ -145,8 +154,6 @@ public class PlayerActivityListener implements Listener {
         if (!detectCommands) return;
 
         String cmd = event.getMessage().toLowerCase();
-
-        // Игнорируем команды плагина
         if (cmd.startsWith("/afk")) return;
 
         safeUpdateActivity(event.getPlayer());
@@ -192,12 +199,10 @@ public class PlayerActivityListener implements Listener {
         Player player = (Player) event.getEntity();
         AfkPlayer afkPlayer = afkManager.getAfkPlayer(player);
 
-        // Обновляем активность при получении урона
         if (detectDamage) {
             safeUpdateActivity(player);
         }
 
-        // Отменяем урон для АФК игроков
         if (afkPlayer != null && afkPlayer.isAfk() && disableDamage) {
             event.setCancelled(true);
         }
@@ -205,20 +210,17 @@ public class PlayerActivityListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onRespawn(PlayerRespawnEvent event) {
-        // Сбрасываем АФК после респавна
         safeUpdateActivity(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onTeleport(PlayerTeleportEvent event) {
-        // Не сбрасываем АФК если телепортируемся В афк-мир
         if (event.getTo() != null &&
                 event.getTo().getWorld() != null &&
                 event.getTo().getWorld().getName().equals(afkWorldName)) {
             return;
         }
 
-        // Сбрасываем АФК при телепорте куда-то ещё
         if (detectMovement) {
             safeUpdateActivity(event.getPlayer());
         }
