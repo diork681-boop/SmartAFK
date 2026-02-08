@@ -1,29 +1,49 @@
 package com.honeymysteryworld.smartafk;
 
+import org.bukkit.GameMode;
 import org.bukkit.Location;
+
 import java.util.UUID;
 
 public class AfkPlayer {
 
     private final UUID uuid;
     private long lastActivity;
+    private long afkStartTime;
     private boolean afk;
+
+    // Сохранённое состояние
     private Location returnLocation;
     private boolean wasFlying;
     private boolean wasAllowFlight;
+    private GameMode wasGameMode;
+    private String originalDisplayName;
+    private String originalTabName;
+
+    // Для предупреждений о кике
+    private long lastWarningTime;
 
     public AfkPlayer(UUID uuid) {
         this.uuid = uuid;
         this.lastActivity = System.currentTimeMillis();
+        this.afkStartTime = 0;
         this.afk = false;
         this.returnLocation = null;
         this.wasFlying = false;
         this.wasAllowFlight = false;
+        this.wasGameMode = null;
+        this.originalDisplayName = null;
+        this.originalTabName = null;
+        this.lastWarningTime = -1;
     }
+
+    // ==================== UUID ====================
 
     public UUID getUuid() {
         return uuid;
     }
+
+    // ==================== Активность ====================
 
     public long getLastActivity() {
         return lastActivity;
@@ -31,7 +51,14 @@ public class AfkPlayer {
 
     public void updateActivity() {
         this.lastActivity = System.currentTimeMillis();
+        this.lastWarningTime = -1; // Сброс предупреждений
     }
+
+    public long getInactiveTime() {
+        return System.currentTimeMillis() - lastActivity;
+    }
+
+    // ==================== АФК статус ====================
 
     public boolean isAfk() {
         return afk;
@@ -39,7 +66,42 @@ public class AfkPlayer {
 
     public void setAfk(boolean afk) {
         this.afk = afk;
+        if (afk) {
+            this.afkStartTime = System.currentTimeMillis();
+        } else {
+            this.afkStartTime = 0;
+            this.lastWarningTime = -1;
+        }
     }
+
+    public long getAfkStartTime() {
+        return afkStartTime;
+    }
+
+    public long getAfkDuration() {
+        if (!afk || afkStartTime == 0) {
+            return 0;
+        }
+        return System.currentTimeMillis() - afkStartTime;
+    }
+
+    public String getAfkDurationFormatted() {
+        long seconds = getAfkDuration() / 1000;
+
+        if (seconds < 60) {
+            return seconds + " сек";
+        } else if (seconds < 3600) {
+            long mins = seconds / 60;
+            long secs = seconds % 60;
+            return mins + " мин " + secs + " сек";
+        } else {
+            long hours = seconds / 3600;
+            long mins = (seconds % 3600) / 60;
+            return hours + " ч " + mins + " мин";
+        }
+    }
+
+    // ==================== Локация возврата ====================
 
     public Location getReturnLocation() {
         return returnLocation;
@@ -48,6 +110,12 @@ public class AfkPlayer {
     public void setReturnLocation(Location location) {
         this.returnLocation = location != null ? location.clone() : null;
     }
+
+    public boolean hasReturnLocation() {
+        return returnLocation != null && returnLocation.getWorld() != null;
+    }
+
+    // ==================== Состояние полёта ====================
 
     public boolean wasFlying() {
         return wasFlying;
@@ -65,19 +133,68 @@ public class AfkPlayer {
         this.wasAllowFlight = wasAllowFlight;
     }
 
-    public long getAfkDuration() {
-        return System.currentTimeMillis() - lastActivity;
+    // ==================== GameMode ====================
+
+    public GameMode getWasGameMode() {
+        return wasGameMode;
     }
 
-    public String getAfkDurationFormatted() {
-        long seconds = getAfkDuration() / 1000;
+    public void setWasGameMode(GameMode gameMode) {
+        this.wasGameMode = gameMode;
+    }
 
-        if (seconds < 60) {
-            return seconds + " сек";
-        } else if (seconds < 3600) {
-            return (seconds / 60) + " мин";
-        } else {
-            return (seconds / 3600) + " ч " + ((seconds % 3600) / 60) + " мин";
-        }
+    // ==================== Имена ====================
+
+    public String getOriginalDisplayName() {
+        return originalDisplayName;
+    }
+
+    public void setOriginalDisplayName(String name) {
+        this.originalDisplayName = name;
+    }
+
+    public String getOriginalTabName() {
+        return originalTabName;
+    }
+
+    public void setOriginalTabName(String name) {
+        this.originalTabName = name;
+    }
+
+    // ==================== Предупреждения ====================
+
+    public long getLastWarningTime() {
+        return lastWarningTime;
+    }
+
+    public void setLastWarningTime(long time) {
+        this.lastWarningTime = time;
+    }
+
+    // ==================== Утилиты ====================
+
+    /**
+     * Сброс всех сохранённых данных
+     */
+    public void reset() {
+        this.afk = false;
+        this.afkStartTime = 0;
+        this.returnLocation = null;
+        this.wasFlying = false;
+        this.wasAllowFlight = false;
+        this.wasGameMode = null;
+        this.originalDisplayName = null;
+        this.originalTabName = null;
+        this.lastWarningTime = -1;
+        this.lastActivity = System.currentTimeMillis();
+    }
+
+    @Override
+    public String toString() {
+        return "AfkPlayer{" +
+                "uuid=" + uuid +
+                ", afk=" + afk +
+                ", inactive=" + (getInactiveTime() / 1000) + "s" +
+                '}';
     }
 }

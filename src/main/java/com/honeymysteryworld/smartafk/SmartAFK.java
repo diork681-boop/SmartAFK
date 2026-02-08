@@ -5,108 +5,185 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public class SmartAFK extends JavaPlugin {
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class SmartAFK extends JavaPlugin implements TabCompleter {
+
+    private static SmartAFK instance;
 
     private AfkManager afkManager;
+    private PlayerActivityListener activityListener;
 
     @Override
     public void onEnable() {
-        // Конфиг
-        saveDefaultConfig();
+        instance = this;
 
-        // Инфо о версии
-        getLogger().info("Версия сервера: " + VersionUtil.getVersionString());
+        try {
+            // Конфиг
+            saveDefaultConfig();
 
-        // Менеджер АФК
-        afkManager = new AfkManager(this);
+            // Инфо о версии
+            getLogger().info("Сервер: " + Bukkit.getName() + " " + VersionUtil.getVersionString());
 
-        // Слушатели
-        getServer().getPluginManager().registerEvents(
-                new PlayerActivityListener(this, afkManager), this
-        );
+            // Менеджер АФК
+            afkManager = new AfkManager(this);
 
-        getLogger().info("SmartAFK v" + getDescription().getVersion() + " успешно загружен!");
+            // Слушатели
+            activityListener = new PlayerActivityListener(this, afkManager);
+            getServer().getPluginManager().registerEvents(activityListener, this);
+
+            // Tab-complete
+            if (getCommand("afk") != null) getCommand("afk").setTabCompleter(this);
+            if (getCommand("afkstatus") != null) getCommand("afkstatus").setTabCompleter(this);
+            if (getCommand("afkreload") != null) getCommand("afkreload").setTabCompleter(this);
+
+            getLogger().info("SmartAFK v" + getDescription().getVersion() + " успешно загружен!");
+
+        } catch (Exception e) {
+            getLogger().severe("Ошибка загрузки плагина: " + e.getMessage());
+            e.printStackTrace();
+            getServer().getPluginManager().disablePlugin(this);
+        }
     }
 
     @Override
     public void onDisable() {
-        // Возвращаем всех АФК игроков
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            AfkPlayer afkPlayer = afkManager.getAfkPlayer(player);
-            if (afkPlayer.isAfk() && afkPlayer.getReturnLocation() != null) {
-                player.teleport(afkPlayer.getReturnLocation());
-                player.setAllowFlight(afkPlayer.wasAllowFlight());
-                player.setFlying(afkPlayer.wasFlying());
+        try {
+            // Корректное выключение менеджера
+            if (afkManager != null) {
+                afkManager.shutdown();
             }
+        } catch (Exception e) {
+            getLogger().warning("Ошибка при выключении: " + e.getMessage());
         }
 
+        instance = null;
         getLogger().info("SmartAFK выключен!");
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-
         String cmd = command.getName().toLowerCase();
 
-        // /afk
-        if (cmd.equals("afk")) {
-            if (!(sender instanceof Player)) {
-                sender.sendMessage(colorize("&cТолько для игроков!"));
-                return true;
+        try {
+            switch (cmd) {
+                case "afk":
+                    return handleAfkCommand(sender, args);
+                case "afkstatus":
+                    return handleStatusCommand(sender, args);
+                case "afkreload":
+                    return handleReloadCommand(sender, args);
+                default:
+                    return false;
             }
+        } catch (Exception e) {
+            sender.sendMessage(colorize("&cПроизошла ошибка! Проверьте консоль."));
+            getLogger().warning("Ошибка команды /" + cmd + ": " + e.getMessage());
+            return true;
+        }
+    }
 
-            Player player = (Player) sender;
-            afkManager.toggleAfk(player);
+    private boolean handleAfkCommand(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(colorize(getMessage("messages.players-only", "&cТолько для игроков!")));
             return true;
         }
 
-        // /afkstatus
-        if (cmd.equals("afkstatus")) {
-            sender.sendMessage(colorize("&6&l=== АФК Игроки ==="));
+        Player player = (Player) sender;
 
-            int count = 0;
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                AfkPlayer afkPlayer = afkManager.getAfkPlayer(player);
-                if (afkPlayer.isAfk()) {
-                    sender.sendMessage(colorize("&7- &e" + player.getName() +
-                            " &7(" + afkPlayer.getAfkDurationFormatted() + ")"));
-                    count++;
-                }
-            }
-
-            if (count == 0) {
-                sender.sendMessage(colorize("&7Никто не АФК"));
-            } else {
-                sender.sendMessage(colorize("&7Всего: &e" + count));
-            }
-
+        if (!player.hasPermission("smartafk.afk")) {
+            sender.sendMessage(colorize(getMessage("messages.no-permission", "&cНет прав!")));
             return true;
         }
 
-        // /afkreload
-        if (cmd.equals("afkreload")) {
-            if (!sender.hasPermission("smartafk.reload")) {
-                sender.sendMessage(colorize("&cНет прав!"));
-                return true;
-            }
+        afkManager.toggleAfk(player);
+        return true;
+    }
 
-            reloadConfig();
-            sender.sendMessage(colorize(
-                    getConfig().getString("messages.reload", "&aКонфиг перезагружен!")));
+    private boolean handleStatusCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("smartafk.status")) {
+            sender.sendMessage(colorize(getMessage("messages.no-permission", "&cНет прав!")));
             return true;
         }
 
-        return false;
+        String prefix = getMessage("messages.prefix", "&7[&6SmartAFK&7] ");
+
+        sender.sendMessage(colorize("&6&l══════ АФК Игроки ══════"));
+
+        int count = 0;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            AfkPlayer afkPlayer = afkManager.getAfkPlayer(player);
+            if (afkPlayer != null && afkPlayer.isAfk()) {
+                sender.sendMessage(colorize("&7• &e" + player.getName() +
+                        " &8— &7" + afkPlayer.getAfkDurationFormatted()));
+                count++;
+            }
+        }
+
+        if (count == 0) {
+            sender.sendMessage(colorize("&7Никто не АФК"));
+        } else {
+            sender.sendMessage(colorize("&6Всего: &e" + count + " &6игрок(ов)"));
+        }
+
+        sender.sendMessage(colorize("&6&l═════════════════════════"));
+
+        return true;
+    }
+
+    private boolean handleReloadCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("smartafk.reload")) {
+            sender.sendMessage(colorize(getMessage("messages.no-permission", "&cНет прав!")));
+            return true;
+        }
+
+        // Перезагружаем конфиг
+        reloadConfig();
+
+        // Обновляем настройки в менеджере
+        if (afkManager != null) {
+            afkManager.reloadSettings();
+        }
+
+        // Обновляем настройки в листенере
+        if (activityListener != null) {
+            activityListener.reloadSettings();
+        }
+
+        sender.sendMessage(colorize(getMessage("messages.reload", "&aКонфиг успешно перезагружен!")));
+        getLogger().info("Конфиг перезагружен игроком " + sender.getName());
+
+        return true;
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        // Для этих команд не нужен tab-complete
+        return Collections.emptyList();
+    }
+
+    // ==================== Утилиты ====================
+
+    public static SmartAFK getInstance() {
+        return instance;
     }
 
     public AfkManager getAfkManager() {
         return afkManager;
     }
 
-    private String colorize(String msg) {
+    public String getMessage(String path, String def) {
+        return getConfig().getString(path, def);
+    }
+
+    public String colorize(String msg) {
+        if (msg == null) return "";
         return ChatColor.translateAlternateColorCodes('&', msg);
     }
 }
