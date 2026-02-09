@@ -1,5 +1,7 @@
 package com.honeymysteryworld.smartafk;
 
+import com.honeymysteryworld.smartafk.utils.BackupManager;
+import com.honeymysteryworld.smartafk.utils.Logger;
 import org.bukkit.*;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -12,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AfkManager {
 
     private final SmartAFK plugin;
+    private final Logger logger;
+    private final BackupManager backupManager;
     private final Map<UUID, AfkPlayer> players;
     private BukkitTask checkerTask;
 
@@ -27,8 +31,10 @@ public class AfkManager {
     private String kickMessage;
     private String kickWarningMessage;
 
-    public AfkManager(SmartAFK plugin) {
+    public AfkManager(SmartAFK plugin, Logger logger, BackupManager backupManager) {
         this.plugin = plugin;
+        this.logger = logger;
+        this.backupManager = backupManager;
         this.players = new ConcurrentHashMap<>();
         reloadSettings();
         startAfkChecker();
@@ -45,6 +51,8 @@ public class AfkManager {
         afkSpawnZ = plugin.getConfig().getDouble("afk-world.spawn-location.z", 0.5);
         kickMessage = plugin.getConfig().getString("kick-message", "&cВы были кикнуты за долгий АФК");
         kickWarningMessage = plugin.getConfig().getString("messages.afk-kick-warning", "&cКик через {time} секунд!");
+
+        logger.debug("Настройки перезагружены");
     }
 
     public void shutdown() {
@@ -58,13 +66,15 @@ public class AfkManager {
                 AfkPlayer afkPlayer = players.get(player.getUniqueId());
                 if (afkPlayer != null && afkPlayer.isAfk()) {
                     returnFromAfk(player, afkPlayer);
+                    logger.debug("Возвращён игрок: " + player.getName());
                 }
             } catch (Exception e) {
-                plugin.getLogger().warning("Ошибка возврата игрока " + player.getName() + ": " + e.getMessage());
+                logger.error("Ошибка возврата игрока " + player.getName(), e);
             }
         }
 
         players.clear();
+        logger.debug("AfkManager остановлен");
     }
 
     public AfkPlayer getAfkPlayer(Player player) {
@@ -75,6 +85,7 @@ public class AfkManager {
     public void removePlayer(UUID uuid) {
         if (uuid != null) {
             players.remove(uuid);
+            logger.debug("Удалён игрок: " + uuid);
         }
     }
 
@@ -107,8 +118,12 @@ public class AfkManager {
             } else {
                 onAfkEnd(player, afkPlayer);
             }
+
+            // Сохраняем бэкап при изменении статуса
+            backupManager.saveBackup(players);
+
         } catch (Exception e) {
-            plugin.getLogger().warning("Ошибка изменения АФК статуса: " + e.getMessage());
+            logger.error("Ошибка изменения АФК статуса для " + player.getName(), e);
         }
     }
 
@@ -131,6 +146,8 @@ public class AfkManager {
         if (freezeChunks) {
             setChunkForceLoaded(afkPlayer.getReturnLocation(), false);
         }
+
+        logger.debug("АФК старт: " + player.getName());
     }
 
     private void onAfkEnd(Player player, AfkPlayer afkPlayer) {
@@ -145,6 +162,8 @@ public class AfkManager {
         if (freezeChunks && afkPlayer.getReturnLocation() != null) {
             setChunkForceLoaded(afkPlayer.getReturnLocation(), true);
         }
+
+        logger.debug("АФК конец: " + player.getName());
     }
 
     private void returnFromAfk(Player player, AfkPlayer afkPlayer) {
@@ -191,11 +210,13 @@ public class AfkManager {
                     try {
                         checkPlayer(player, now);
                     } catch (Exception e) {
-                        plugin.getLogger().warning("Ошибка проверки игрока: " + e.getMessage());
+                        logger.error("Ошибка проверки игрока " + player.getName(), e);
                     }
                 }
             }
         }.runTaskTimer(plugin, 20L, 20L);
+
+        logger.debug("АФК чекер запущен");
     }
 
     private void checkPlayer(Player player, long now) {
@@ -217,6 +238,7 @@ public class AfkManager {
 
         if (timeLeft <= 0) {
             player.kickPlayer(colorize(kickMessage));
+            logger.info("Кикнут за АФК: " + player.getName());
             return;
         }
 
@@ -245,12 +267,12 @@ public class AfkManager {
             player.setAllowFlight(true);
             player.setFlying(true);
         } else {
-            plugin.getLogger().warning("Не удалось создать АФК-мир!");
+            logger.warning("Не удалось создать АФК-мир!");
         }
     }
 
     private World createAfkWorld() {
-        plugin.getLogger().info("Создаю АФК-мир: " + afkWorldName);
+        logger.info("Создаю АФК-мир: " + afkWorldName);
 
         try {
             WorldCreator creator = new WorldCreator(afkWorldName);
@@ -262,12 +284,12 @@ public class AfkManager {
 
             if (world != null) {
                 setupAfkWorld(world);
-                plugin.getLogger().info("АФК-мир успешно создан!");
+                logger.info("АФК-мир создан!");
             }
 
             return world;
         } catch (Exception e) {
-            plugin.getLogger().severe("Ошибка создания АФК-мира: " + e.getMessage());
+            logger.error("Ошибка создания АФК-мира", e);
             return null;
         }
     }

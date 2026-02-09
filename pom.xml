@@ -7,7 +7,7 @@
 
     <groupId>com.honeymysteryworld</groupId>
     <artifactId>SmartAFK</artifactId>
-    <version>2.0</version>
+    <version>2.1</version>
     <packaging>jar</packaging>
 
     <properties>
@@ -29,6 +29,13 @@
             <version>1.20.4-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
+        <!-- bStats -->
+        <dependency>
+            <groupId>org.bstats</groupId>
+            <artifactId>bstats-bukkit</artifactId>
+            <version>3.0.2</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -42,6 +49,28 @@
                     <target>${java.version}</target>
                     <encoding>UTF-8</encoding>
                 </configuration>
+            </plugin>
+            <!-- Shade bStats в jar -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <relocations>
+                                <relocation>
+                                    <pattern>org.bstats</pattern>
+                                    <shadedPattern>com.honeymysteryworld.smartafk.bstats</shadedPattern>
+                                </relocation>
+                            </relocations>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

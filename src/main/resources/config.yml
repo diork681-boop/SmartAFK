@@ -1,12 +1,12 @@
 # ╔═══════════════════════════════════════════╗
 # ║           SmartAFK Configuration          ║
-# ║            Версии: 1.13 - 1.21+           ║
+# ║              Version 1.1                  ║
 # ╚═══════════════════════════════════════════╝
 
 # Через сколько секунд бездействия игрок станет АФК
 afk-timeout: 300
 
-# Кикать после долгого АФК (в секундах, 0 = выключено)
+# Кикать после долгого АФК (0 = выключено)
 kick-timeout: 1800
 
 # Сообщение при кике
@@ -23,18 +23,18 @@ afk-world:
     y: 100
     z: 0.5
 
-# Заморозить загрузку чанков (снижает нагрузку)
+# Заморозить чанки
 freeze-chunks: true
 
 # ─────────────────────────────────────────────
-# Сообщения (поддержка & цветов)
+# Сообщения
 # ─────────────────────────────────────────────
 messages:
   prefix: "&7[&6SmartAFK&7] "
   afk-on: "&e{player} &fтеперь АФК"
   afk-off: "&e{player} &fвернулся в игру"
   afk-kick-warning: "&c⚠ Кик через {time} сек за АФК!"
-  reload: "&aКонфиг успешно перезагружен!"
+  reload: "&aКонфиг перезагружен!"
   no-permission: "&cНедостаточно прав!"
   players-only: "&cТолько для игроков!"
 
@@ -42,30 +42,28 @@ messages:
 # Определение активности
 # ─────────────────────────────────────────────
 detection:
-  movement: true       # Передвижение
-  look: false          # Поворот головы (без движения)
-  chat: true           # Сообщения в чат
-  commands: true       # Команды
-  block-break: true    # Разрушение блоков
-  block-place: true    # Установка блоков
-  interact: true       # Взаимодействие
-  inventory: true      # Клики в инвентаре
-  damage: true         # Получение урона
+  movement: true
+  chat: true
+  commands: true
+  block-break: true
+  block-place: true
+  interact: true
+  inventory: true
+  damage: true
 
 # ─────────────────────────────────────────────
-# Дополнительно
+# Настройки
 # ─────────────────────────────────────────────
 settings:
-  # Показывать [AFK] в табе
   tab-prefix: true
   tab-prefix-format: "&7[AFK] "
-
-  # Показывать [AFK] над головой
-  display-name: true
-  display-name-format: "&7[AFK] &f{player}"
-
-  # Отключить урон в АФК
   disable-damage: true
 
-  # Скрыть АФК игроков от мобов
-  hide-from-mobs: true
+  # Дебаг режим (подробные логи)
+  debug: false
+
+  # Бэкап локаций (защита от крашей)
+  backup-locations: true
+
+  # bStats метрики
+  metrics: true
