@@ -20,7 +20,18 @@ public class AfkPlayer {
     private String originalDisplayName;
     private String originalTabName;
 
-    // Для предупреждений о кике
+    // Здоровье и голод
+    private double wasHealth;
+    private int wasFood;
+    private float wasSaturation;
+
+    // Падение
+    private float wasFallDistance;
+
+    // Вагонетка
+    private boolean wasInVehicle;
+
+    // Предупреждения
     private long lastWarningTime;
 
     public AfkPlayer(UUID uuid) {
@@ -34,6 +45,11 @@ public class AfkPlayer {
         this.wasGameMode = null;
         this.originalDisplayName = null;
         this.originalTabName = null;
+        this.wasHealth = 20.0;
+        this.wasFood = 20;
+        this.wasSaturation = 5.0f;
+        this.wasFallDistance = 0;
+        this.wasInVehicle = false;
         this.lastWarningTime = -1;
     }
 
@@ -51,7 +67,7 @@ public class AfkPlayer {
 
     public void updateActivity() {
         this.lastActivity = System.currentTimeMillis();
-        this.lastWarningTime = -1; // Сброс предупреждений
+        this.lastWarningTime = -1;
     }
 
     public long getInactiveTime() {
@@ -101,7 +117,7 @@ public class AfkPlayer {
         }
     }
 
-    // ==================== Локация возврата ====================
+    // ==================== Локация ====================
 
     public Location getReturnLocation() {
         return returnLocation;
@@ -115,7 +131,7 @@ public class AfkPlayer {
         return returnLocation != null && returnLocation.getWorld() != null;
     }
 
-    // ==================== Состояние полёта ====================
+    // ==================== Полёт ====================
 
     public boolean wasFlying() {
         return wasFlying;
@@ -161,6 +177,52 @@ public class AfkPlayer {
         this.originalTabName = name;
     }
 
+    // ==================== Здоровье и голод ====================
+
+    public double getWasHealth() {
+        return wasHealth;
+    }
+
+    public void setWasHealth(double wasHealth) {
+        this.wasHealth = wasHealth;
+    }
+
+    public int getWasFood() {
+        return wasFood;
+    }
+
+    public void setWasFood(int wasFood) {
+        this.wasFood = wasFood;
+    }
+
+    public float getWasSaturation() {
+        return wasSaturation;
+    }
+
+    public void setWasSaturation(float wasSaturation) {
+        this.wasSaturation = wasSaturation;
+    }
+
+    // ==================== Падение ====================
+
+    public float getWasFallDistance() {
+        return wasFallDistance;
+    }
+
+    public void setWasFallDistance(float wasFallDistance) {
+        this.wasFallDistance = wasFallDistance;
+    }
+
+    // ==================== Вагонетка ====================
+
+    public boolean wasInVehicle() {
+        return wasInVehicle;
+    }
+
+    public void setWasInVehicle(boolean wasInVehicle) {
+        this.wasInVehicle = wasInVehicle;
+    }
+
     // ==================== Предупреждения ====================
 
     public long getLastWarningTime() {
@@ -173,9 +235,6 @@ public class AfkPlayer {
 
     // ==================== Утилиты ====================
 
-    /**
-     * Сброс всех сохранённых данных
-     */
     public void reset() {
         this.afk = false;
         this.afkStartTime = 0;
@@ -185,6 +244,11 @@ public class AfkPlayer {
         this.wasGameMode = null;
         this.originalDisplayName = null;
         this.originalTabName = null;
+        this.wasHealth = 20.0;
+        this.wasFood = 20;
+        this.wasSaturation = 5.0f;
+        this.wasFallDistance = 0;
+        this.wasInVehicle = false;
         this.lastWarningTime = -1;
         this.lastActivity = System.currentTimeMillis();
     }

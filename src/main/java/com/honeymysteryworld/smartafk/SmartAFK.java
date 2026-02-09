@@ -9,6 +9,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -26,6 +27,8 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
     private ConfigValidator configValidator;
     private BackupManager backupManager;
 
+    private boolean fullyLoaded = false; // Флаг успешной загрузки
+
     private static final int BSTATS_ID = 12345; // Замени на свой ID
 
     @Override
@@ -36,17 +39,19 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
             // Конфиг
             saveDefaultConfig();
 
-            // Логгер
+            // Логгер (инициализируем первым для логирования ошибок)
             logger = new Logger(this);
 
             // Валидация конфига
             configValidator = new ConfigValidator(this, logger);
-            configValidator.validate();
+            if (!configValidator.validate()) {
+                logger.warning("Конфиг содержал ошибки и был исправлен");
+            }
 
             // Бэкап менеджер
             backupManager = new BackupManager(this, logger);
 
-            // Менеджер АФК
+            // Менеджер АФК (создаёт мир при инициализации — FIX #2)
             afkManager = new AfkManager(this, logger, backupManager);
 
             // Загружаем бэкап если есть
@@ -56,28 +61,44 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
             activityListener = new PlayerActivityListener(this, afkManager);
             getServer().getPluginManager().registerEvents(activityListener, this);
 
-            // Tab-complete
-            if (getCommand("afk") != null) getCommand("afk").setTabCompleter(this);
-            if (getCommand("afkstatus") != null) getCommand("afkstatus").setTabCompleter(this);
-            if (getCommand("afkreload") != null) getCommand("afkreload").setTabCompleter(this);
+            // Регистрация команд с проверкой (FIX #3)
+            registerCommand("afk");
+            registerCommand("afkstatus");
+            registerCommand("afkreload");
 
             // bStats
             if (getConfig().getBoolean("settings.metrics", true)) {
-                new Metrics(this, BSTATS_ID);
-                logger.debug("bStats метрики включены");
+                try {
+                    new Metrics(this, BSTATS_ID);
+                    logger.debug("bStats метрики включены");
+                } catch (Exception e) {
+                    logger.warning("Не удалось инициализировать bStats: " + e.getMessage());
+                }
             }
 
-            // Автосохранение бэкапа каждые 5 минут
-            Bukkit.getScheduler().runTaskTimer(this, () -> {
-                backupManager.saveBackup(afkManager.getPlayers());
+            // FIX #1: Асинхронное автосохранение бэкапа каждые 5 минут
+            Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
+                try {
+                    if (afkManager != null) {
+                        backupManager.saveBackup(afkManager.getPlayers());
+                    }
+                } catch (Exception e) {
+                    logger.error("Ошибка автосохранения бэкапа", e);
+                }
             }, 6000L, 6000L);
+
+            fullyLoaded = true;
 
             logger.info("SmartAFK v" + getDescription().getVersion() + " загружен!");
             logger.info("Сервер: " + VersionUtil.getFullVersion());
 
         } catch (Exception e) {
-            getLogger().severe("Ошибка загрузки плагина: " + e.getMessage());
-            e.printStackTrace();
+            if (logger != null) {
+                logger.error("Критическая ошибка загрузки плагина", e);
+            } else {
+                getLogger().severe("Критическая ошибка загрузки: " + e.getMessage());
+                e.printStackTrace();
+            }
             getServer().getPluginManager().disablePlugin(this);
         }
     }
@@ -86,7 +107,7 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
     public void onDisable() {
         try {
             if (afkManager != null) {
-                // Сохраняем бэкап перед выключением
+                // Синхронный бэкап при выключении (важно сохранить данные)
                 if (backupManager != null) {
                     backupManager.saveBackup(afkManager.getPlayers());
                 }
@@ -95,17 +116,42 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
         } catch (Exception e) {
             if (logger != null) {
                 logger.error("Ошибка при выключении", e);
+            } else {
+                getLogger().severe("Ошибка при выключении: " + e.getMessage());
             }
         }
 
         instance = null;
+        fullyLoaded = false;
+
         if (logger != null) {
             logger.info("SmartAFK выключен!");
         }
     }
 
+    /**
+     * FIX #3: Регистрация команды с проверкой
+     */
+    private void registerCommand(String name) {
+        PluginCommand command = getCommand(name);
+
+        if (command == null) {
+            logger.error("Команда /" + name + " не найдена в plugin.yml!");
+            return;
+        }
+
+        command.setTabCompleter(this);
+        logger.debug("Команда /" + name + " зарегистрирована");
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        // FIX #4: Проверка что плагин полностью загружен
+        if (!fullyLoaded) {
+            sender.sendMessage(colorize("&cПлагин ещё загружается, подождите..."));
+            return true;
+        }
+
         String cmd = command.getName().toLowerCase();
 
         try {
@@ -121,7 +167,9 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
             }
         } catch (Exception e) {
             sender.sendMessage(colorize("&cПроизошла ошибка! Проверьте консоль."));
-            logger.error("Ошибка команды /" + cmd, e);
+            if (logger != null) {
+                logger.error("Ошибка команды /" + cmd, e);
+            }
             return true;
         }
     }
@@ -139,8 +187,13 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
             return true;
         }
 
-        afkManager.toggleAfk(player);
-        logger.debug("Игрок " + player.getName() + " переключил АФК");
+        if (afkManager != null) {
+            afkManager.toggleAfk(player);
+            if (logger != null) {
+                logger.debug("Игрок " + player.getName() + " переключил АФК");
+            }
+        }
+
         return true;
     }
 
@@ -153,12 +206,15 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
         sender.sendMessage(colorize("&6&l══════ АФК Игроки ══════"));
 
         int count = 0;
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            AfkPlayer afkPlayer = afkManager.getAfkPlayer(player);
-            if (afkPlayer != null && afkPlayer.isAfk()) {
-                sender.sendMessage(colorize("&7• &e" + player.getName() +
-                        " &8— &7" + afkPlayer.getAfkDurationFormatted()));
-                count++;
+
+        if (afkManager != null) {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                AfkPlayer afkPlayer = afkManager.getAfkPlayer(player);
+                if (afkPlayer != null && afkPlayer.isAfk()) {
+                    sender.sendMessage(colorize("&7• &e" + player.getName() +
+                            " &8— &7" + afkPlayer.getAfkDurationFormatted()));
+                    count++;
+                }
             }
         }
 
@@ -179,20 +235,41 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
             return true;
         }
 
-        // Перезагружаем конфиг
-        reloadConfig();
+        try {
+            // Перезагружаем конфиг
+            reloadConfig();
 
-        // Валидация
-        configValidator.validate();
+            // Валидация
+            if (configValidator != null) {
+                configValidator.validate();
+            }
 
-        // Обновляем все компоненты
-        if (logger != null) logger.reload();
-        if (backupManager != null) backupManager.reload();
-        if (afkManager != null) afkManager.reloadSettings();
-        if (activityListener != null) activityListener.reloadSettings();
+            // FIX #4: Проверки на null перед вызовом
+            if (logger != null) {
+                logger.reload();
+            }
+            if (backupManager != null) {
+                backupManager.reload();
+            }
+            if (afkManager != null) {
+                afkManager.reloadSettings();
+            }
+            if (activityListener != null) {
+                activityListener.reloadSettings();
+            }
 
-        sender.sendMessage(colorize(getMessage("messages.reload", "&aКонфиг перезагружен!")));
-        logger.info("Конфиг перезагружен игроком " + sender.getName());
+            sender.sendMessage(colorize(getMessage("messages.reload", "&aКонфиг перезагружен!")));
+
+            if (logger != null) {
+                logger.info("Конфиг перезагружен игроком " + sender.getName());
+            }
+
+        } catch (Exception e) {
+            sender.sendMessage(colorize("&cОшибка перезагрузки! Проверьте консоль."));
+            if (logger != null) {
+                logger.error("Ошибка перезагрузки конфига", e);
+            }
+        }
 
         return true;
     }
@@ -214,6 +291,10 @@ public class SmartAFK extends JavaPlugin implements TabCompleter {
 
     public Logger getPluginLogger() {
         return logger;
+    }
+
+    public boolean isFullyLoaded() {
+        return fullyLoaded;
     }
 
     public String getMessage(String path, String def) {

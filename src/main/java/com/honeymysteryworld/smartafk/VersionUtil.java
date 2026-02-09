@@ -6,7 +6,6 @@ public final class VersionUtil {
 
     private static final int MAJOR_VERSION;
     private static final int MINOR_VERSION;
-    private static final int PATCH_VERSION;
     private static final String SERVER_TYPE;
     private static final String VERSION_STRING;
 
@@ -14,13 +13,12 @@ public final class VersionUtil {
     private static final boolean HAS_FORCE_LOADED;
     private static final boolean HAS_GAME_RULE_ENUM;
     private static final boolean HAS_ADVENTURE_API;
-    private static final boolean HAS_FOLIA;
+    private static final boolean IS_FOLIA;
+    private static final boolean IS_PAPER;
 
     static {
         int major = 0;
         int minor = 0;
-        int patch = 0;
-        String serverType = "Unknown";
 
         try {
             // Парсим версию
@@ -35,46 +33,95 @@ public final class VersionUtil {
                 minor = Integer.parseInt(parts[2]);
             }
 
-            // Определяем тип сервера
-            String serverName = Bukkit.getName().toLowerCase();
-            if (serverName.contains("folia")) {
-                serverType = "Folia";
-            } else if (serverName.contains("paper")) {
-                serverType = "Paper";
-            } else if (serverName.contains("purpur")) {
-                serverType = "Purpur";
-            } else if (serverName.contains("pufferfish")) {
-                serverType = "Pufferfish";
-            } else if (serverName.contains("spigot")) {
-                serverType = "Spigot";
-            } else if (serverName.contains("bukkit") || serverName.contains("craftbukkit")) {
-                serverType = "Bukkit";
-            } else {
-                serverType = Bukkit.getName();
-            }
-
         } catch (Exception e) {
-            Bukkit.getLogger().warning("[SmartAFK] Не удалось определить версию сервера: " + e.getMessage());
+            Bukkit.getLogger().warning("[SmartAFK] Не удалось определить версию: " + e.getMessage());
             major = 20; // Fallback
             minor = 0;
         }
 
         MAJOR_VERSION = major;
         MINOR_VERSION = minor;
-        PATCH_VERSION = patch;
-        SERVER_TYPE = serverType;
         VERSION_STRING = "1." + MAJOR_VERSION + (MINOR_VERSION > 0 ? "." + MINOR_VERSION : "");
+
+        // FIX #2: Определяем тип сервера через наличие классов
+        IS_FOLIA = checkClass("io.papermc.paper.threadedregions.RegionizedServer");
+        IS_PAPER = checkClass("com.destroystokyo.paper.PaperConfig") ||
+                checkClass("io.papermc.paper.configuration.Configuration");
+
+        SERVER_TYPE = detectServerType();
 
         // Кэшируем проверки
         HAS_FORCE_LOADED = MAJOR_VERSION >= 14;
         HAS_GAME_RULE_ENUM = MAJOR_VERSION >= 13;
-        HAS_ADVENTURE_API = checkAdventureApi();
-        HAS_FOLIA = serverType.equals("Folia");
+        HAS_ADVENTURE_API = checkClass("net.kyori.adventure.text.Component");
+
+        // FIX #3: Предупреждение о Folia
+        if (IS_FOLIA) {
+            Bukkit.getLogger().warning("[SmartAFK] ⚠ Обнаружен Folia сервер!");
+            Bukkit.getLogger().warning("[SmartAFK] ⚠ Плагин может работать нестабильно!");
+            Bukkit.getLogger().warning("[SmartAFK] ⚠ Рекомендуется использовать Paper или Spigot.");
+        }
     }
 
     // Приватный конструктор — утилитный класс
     private VersionUtil() {
         throw new UnsupportedOperationException("Utility class");
+    }
+
+    /**
+     * FIX #2: Проверка наличия класса
+     */
+    private static boolean checkClass(String className) {
+        try {
+            Class.forName(className);
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+
+    /**
+     * FIX #2: Надёжное определение типа сервера
+     */
+    private static String detectServerType() {
+        // Проверяем через классы — это надёжнее чем Bukkit.getName()
+
+        if (IS_FOLIA) {
+            return "Folia";
+        }
+
+        // Purpur
+        if (checkClass("org.purpurmc.purpur.PurpurConfig")) {
+            return "Purpur";
+        }
+
+        // Pufferfish
+        if (checkClass("gg.pufferfish.pufferfish.PufferfishConfig")) {
+            return "Pufferfish";
+        }
+
+        // Paper (проверяем после форков)
+        if (IS_PAPER) {
+            return "Paper";
+        }
+
+        // Spigot
+        if (checkClass("org.spigotmc.SpigotConfig")) {
+            return "Spigot";
+        }
+
+        // CraftBukkit
+        if (checkClass("org.bukkit.craftbukkit.Main")) {
+            return "CraftBukkit";
+        }
+
+        // Fallback — берём из Bukkit.getName()
+        String name = Bukkit.getName();
+        if (name != null && !name.isEmpty()) {
+            return name;
+        }
+
+        return "Unknown";
     }
 
     // ==================== Версии ====================
@@ -165,20 +212,17 @@ public final class VersionUtil {
     }
 
     /**
-     * Это Folia сервер
+     * Это Folia сервер (⚠ плагин может работать нестабильно)
      */
     public static boolean isFolia() {
-        return HAS_FOLIA;
+        return IS_FOLIA;
     }
 
     /**
      * Это Paper или форк Paper
      */
     public static boolean isPaper() {
-        return SERVER_TYPE.equals("Paper") ||
-                SERVER_TYPE.equals("Purpur") ||
-                SERVER_TYPE.equals("Pufferfish") ||
-                SERVER_TYPE.equals("Folia");
+        return IS_PAPER;
     }
 
     /**
@@ -193,16 +237,5 @@ public final class VersionUtil {
      */
     public static boolean hasHexColors() {
         return isAtLeast(16);
-    }
-
-    // ==================== Приватные методы ====================
-
-    private static boolean checkAdventureApi() {
-        try {
-            Class.forName("net.kyori.adventure.text.Component");
-            return true;
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
     }
 }

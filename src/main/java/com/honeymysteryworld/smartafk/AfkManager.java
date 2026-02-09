@@ -3,6 +3,7 @@ package com.honeymysteryworld.smartafk;
 import com.honeymysteryworld.smartafk.utils.BackupManager;
 import com.honeymysteryworld.smartafk.utils.Logger;
 import org.bukkit.*;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
@@ -18,6 +19,7 @@ public class AfkManager {
     private final BackupManager backupManager;
     private final Map<UUID, AfkPlayer> players;
     private BukkitTask checkerTask;
+    private World afkWorld; // Кэшируем мир
 
     // Кэш настроек
     private int afkTimeout;
@@ -37,6 +39,12 @@ public class AfkManager {
         this.backupManager = backupManager;
         this.players = new ConcurrentHashMap<>();
         reloadSettings();
+
+        // === FIX #2: Создаём мир при старте, а не при первом АФК ===
+        if (afkWorldEnabled) {
+            initAfkWorld();
+        }
+
         startAfkChecker();
     }
 
@@ -55,6 +63,20 @@ public class AfkManager {
         logger.debug("Настройки перезагружены");
     }
 
+    /**
+     * FIX #2: Инициализация АФК мира при старте плагина
+     */
+    private void initAfkWorld() {
+        afkWorld = Bukkit.getWorld(afkWorldName);
+
+        if (afkWorld == null) {
+            logger.info("Создаю АФК-мир при старте: " + afkWorldName);
+            afkWorld = createAfkWorld();
+        } else {
+            logger.info("АФК-мир загружен: " + afkWorldName);
+        }
+    }
+
     public void shutdown() {
         if (checkerTask != null) {
             checkerTask.cancel();
@@ -65,6 +87,8 @@ public class AfkManager {
             try {
                 AfkPlayer afkPlayer = players.get(player.getUniqueId());
                 if (afkPlayer != null && afkPlayer.isAfk()) {
+                    // === FIX #7: Сбрасываем имя в табе ===
+                    player.setPlayerListName(player.getName());
                     returnFromAfk(player, afkPlayer);
                     logger.debug("Возвращён игрок: " + player.getName());
                 }
@@ -87,6 +111,26 @@ public class AfkManager {
             players.remove(uuid);
             logger.debug("Удалён игрок: " + uuid);
         }
+    }
+
+    /**
+     * FIX #7: Вызывается при выходе игрока — сбрасываем имя
+     */
+    public void handlePlayerQuit(Player player) {
+        if (player == null) return;
+
+        AfkPlayer afkPlayer = players.get(player.getUniqueId());
+        if (afkPlayer != null && afkPlayer.isAfk()) {
+            // Сбрасываем имя в табе
+            player.setPlayerListName(player.getName());
+
+            // Возвращаем на место перед выходом
+            if (afkPlayer.hasReturnLocation()) {
+                player.teleport(afkPlayer.getReturnLocation());
+            }
+        }
+
+        removePlayer(player.getUniqueId());
     }
 
     public void updateActivity(Player player) {
@@ -119,7 +163,6 @@ public class AfkManager {
                 onAfkEnd(player, afkPlayer);
             }
 
-            // Сохраняем бэкап при изменении статуса
             backupManager.saveBackup(players);
 
         } catch (Exception e) {
@@ -128,9 +171,23 @@ public class AfkManager {
     }
 
     private void onAfkStart(Player player, AfkPlayer afkPlayer) {
+        // Сохраняем состояние
         afkPlayer.setReturnLocation(player.getLocation());
         afkPlayer.setWasFlying(player.isFlying());
         afkPlayer.setWasAllowFlight(player.getAllowFlight());
+        afkPlayer.setWasHealth(player.getHealth());
+        afkPlayer.setWasFood(player.getFoodLevel());
+        afkPlayer.setWasSaturation(player.getSaturation());
+
+        // Сбрасываем падение (урон получит при возврате если нужно)
+        afkPlayer.setWasFallDistance(player.getFallDistance());
+        player.setFallDistance(0);
+
+        // Выходим из вагонетки/лодки
+        if (player.isInsideVehicle()) {
+            afkPlayer.setWasInVehicle(true);
+            player.leaveVehicle();
+        }
 
         broadcastMessage("messages.afk-on", player);
 
@@ -139,13 +196,15 @@ public class AfkManager {
             player.setPlayerListName(colorize(format) + player.getName());
         }
 
-        if (afkWorldEnabled) {
+        if (afkWorldEnabled && afkWorld != null) {
             teleportToAfkWorld(player);
+
+            // === FIX #3: Делаем игрока бессмертным в АФК мире ===
+            player.setInvulnerable(true);
         }
 
-        if (freezeChunks) {
-            setChunkForceLoaded(afkPlayer.getReturnLocation(), false);
-        }
+        // === FIX #1: Убираем setForceLoaded(false) — не нужно ===
+        // Чанк и так выгрузится когда игрок уйдёт
 
         logger.debug("АФК старт: " + player.getName());
     }
@@ -157,11 +216,17 @@ public class AfkManager {
             player.setPlayerListName(player.getName());
         }
 
+        // === FIX #3: Убираем бессмертие ===
+        player.setInvulnerable(false);
+
         returnFromAfk(player, afkPlayer);
 
-        if (freezeChunks && afkPlayer.getReturnLocation() != null) {
-            setChunkForceLoaded(afkPlayer.getReturnLocation(), true);
-        }
+        // === FIX #6: Сбрасываем урон от падения при возврате ===
+        // Чтобы не было случайных смертей от лагов физики
+        player.setFallDistance(0);
+
+        // === FIX #1: Убираем setForceLoaded(true) — это утечка памяти! ===
+        // Чанк и так загрузится от телепорта игрока
 
         logger.debug("АФК конец: " + player.getName());
     }
@@ -169,14 +234,98 @@ public class AfkManager {
     private void returnFromAfk(Player player, AfkPlayer afkPlayer) {
         Location returnLoc = afkPlayer.getReturnLocation();
 
-        if (returnLoc != null && returnLoc.getWorld() != null) {
-            if (Bukkit.getWorld(returnLoc.getWorld().getName()) != null) {
-                player.teleport(returnLoc);
-                player.setAllowFlight(afkPlayer.wasAllowFlight());
-                player.setFlying(afkPlayer.wasFlying());
+        // === FIX #4: Если локация null — телепортируем на спавн ===
+        if (returnLoc == null || returnLoc.getWorld() == null) {
+            logger.warning("Нет локации возврата для " + player.getName() + ", телепортирую на спавн");
+            World mainWorld = Bukkit.getWorlds().get(0);
+            if (mainWorld != null) {
+                player.teleport(mainWorld.getSpawnLocation());
             }
             afkPlayer.setReturnLocation(null);
+            return;
         }
+
+        // Проверяем что мир загружен
+        if (Bukkit.getWorld(returnLoc.getWorld().getName()) == null) {
+            logger.warning("Мир " + returnLoc.getWorld().getName() + " не загружен, телепортирую на спавн");
+            World mainWorld = Bukkit.getWorlds().get(0);
+            if (mainWorld != null) {
+                player.teleport(mainWorld.getSpawnLocation());
+            }
+            afkPlayer.setReturnLocation(null);
+            return;
+        }
+
+        // === FIX #5: Проверяем безопасность локации ===
+        Location safeLoc = findSafeLocation(returnLoc);
+
+        player.teleport(safeLoc);
+        player.setAllowFlight(afkPlayer.wasAllowFlight());
+        player.setFlying(afkPlayer.wasFlying());
+
+        // Восстанавливаем здоровье и голод
+        player.setHealth(Math.min(afkPlayer.getWasHealth(), player.getMaxHealth()));
+        player.setFoodLevel(afkPlayer.getWasFood());
+        player.setSaturation(afkPlayer.getWasSaturation());
+
+        afkPlayer.setReturnLocation(null);
+    }
+
+    /**
+     * FIX #5: Поиск безопасной локации для телепорта
+     */
+    private Location findSafeLocation(Location loc) {
+        if (isSafeLocation(loc)) {
+            return loc;
+        }
+
+        // Ищем безопасное место выше
+        Location checkLoc = loc.clone();
+        for (int y = 0; y < 10; y++) {
+            checkLoc.setY(loc.getY() + y);
+            if (isSafeLocation(checkLoc)) {
+                logger.debug("Найдена безопасная локация на Y+" + y);
+                return checkLoc;
+            }
+        }
+
+        // Ищем безопасное место ниже
+        checkLoc = loc.clone();
+        for (int y = 0; y < 10; y++) {
+            checkLoc.setY(loc.getY() - y);
+            if (isSafeLocation(checkLoc)) {
+                logger.debug("Найдена безопасная локация на Y-" + y);
+                return checkLoc;
+            }
+        }
+
+        // Не нашли — возвращаем оригинал
+        logger.warning("Не найдена безопасная локация, телепортирую на оригинальную");
+        return loc;
+    }
+
+    /**
+     * Проверка безопасности локации
+     */
+    private boolean isSafeLocation(Location loc) {
+        if (loc == null || loc.getWorld() == null) return false;
+
+        Block feet = loc.getBlock();
+        Block head = feet.getRelative(0, 1, 0);
+        Block ground = feet.getRelative(0, -1, 0);
+
+        // Проверяем что ноги и голова — воздух
+        if (!feet.getType().isAir() || !head.getType().isAir()) {
+            return false;
+        }
+
+        // Проверяем что под ногами не воздух и не лава
+        Material groundType = ground.getType();
+        if (groundType.isAir() || groundType == Material.LAVA || groundType == Material.FIRE) {
+            return false;
+        }
+
+        return true;
     }
 
     public void toggleAfk(Player player) {
@@ -237,6 +386,8 @@ public class AfkManager {
         long timeLeft = kickTimeout - inactive;
 
         if (timeLeft <= 0) {
+            // === FIX #7: Сбрасываем имя перед киком ===
+            player.setPlayerListName(player.getName());
             player.kickPlayer(colorize(kickMessage));
             logger.info("Кикнут за АФК: " + player.getName());
             return;
@@ -255,20 +406,20 @@ public class AfkManager {
     }
 
     private void teleportToAfkWorld(Player player) {
-        World afkWorld = Bukkit.getWorld(afkWorldName);
+        // === FIX #2: Мир уже создан при старте ===
+        if (afkWorld == null) {
+            afkWorld = Bukkit.getWorld(afkWorldName);
+        }
 
         if (afkWorld == null) {
-            afkWorld = createAfkWorld();
+            logger.warning("АФК-мир недоступен! Игрок остаётся на месте.");
+            return;
         }
 
-        if (afkWorld != null) {
-            Location afkSpawn = new Location(afkWorld, afkSpawnX, afkSpawnY, afkSpawnZ);
-            player.teleport(afkSpawn);
-            player.setAllowFlight(true);
-            player.setFlying(true);
-        } else {
-            logger.warning("Не удалось создать АФК-мир!");
-        }
+        Location afkSpawn = new Location(afkWorld, afkSpawnX, afkSpawnY, afkSpawnZ);
+        player.teleport(afkSpawn);
+        player.setAllowFlight(true);
+        player.setFlying(true);
     }
 
     private World createAfkWorld() {
@@ -305,6 +456,7 @@ public class AfkManager {
             world.setGameRule(GameRule.ANNOUNCE_ADVANCEMENTS, false);
             world.setGameRule(GameRule.DO_IMMEDIATE_RESPAWN, true);
             world.setGameRule(GameRule.SPECTATORS_GENERATE_CHUNKS, false);
+            world.setGameRule(GameRule.FALL_DAMAGE, false);
         } catch (Exception e) {
             try {
                 world.setGameRuleValue("doMobSpawning", "false");
@@ -319,16 +471,6 @@ public class AfkManager {
         world.setStorm(false);
         world.setThundering(false);
         world.setDifficulty(Difficulty.PEACEFUL);
-    }
-
-    private void setChunkForceLoaded(Location location, boolean loaded) {
-        if (location == null || location.getWorld() == null) return;
-        if (!VersionUtil.hasForceLoaded()) return;
-
-        try {
-            Chunk chunk = location.getChunk();
-            chunk.setForceLoaded(loaded);
-        } catch (Exception ignored) {}
     }
 
     private void broadcastMessage(String path, Player player) {
